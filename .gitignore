@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+.env
+
+# recordings — never commit, these are patient data
+datasets/
+data/
+*.EEG
+*.21E
+*.PNT
+*.LOG
+*.e
+*.vwr
+*.edf

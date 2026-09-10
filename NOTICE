@@ -1,0 +1,31 @@
+eeg2edf
+Copyright 2026 BellaNes Systems
+
+This product includes software developed as part of the BellaNes Lab project.
+
+Licensed under the Apache License, Version 2.0 (see LICENSE), with the
+following exception:
+
+  vwr2edf/
+    Licensed under the BSD 3-Clause License (see vwr2edf/LICENSE).
+    Contains portions derived from libvwr, Copyright (C) Franco Milicchio.
+    The BSD 3-Clause notice must be retained when redistributing those
+    portions.
+
+The Nihon Kohden converter (nk2edf/) was developed and verified against
+EDFbrowser (GPL-3.0) as an independent implementation of the same format.
+No EDFbrowser source code is included or translated: the verification is
+behavioural, comparing converted output sample-for-sample, and the citations
+of `nk2edf.cpp` line numbers in comments are references explaining format
+decisions, not copied code.
+
+One item warrants an explicit note. `nk2edf/nk.py` carries Nihon Kohden's
+built-in default electrode names for `.21E` channel indices, used only where a
+recording's `.21E` has no entry for an index. These are the recorder vendor's
+own label strings keyed by the vendor's own index numbering -- facts about the
+file format, not authorship of EDFbrowser, which documents the same values.
+Their arrangement is dictated entirely by the format (index to name), leaving
+no room for original selection or arrangement. The implementation here is
+independent: a 34-entry mapping plus three arithmetic range rules, sharing no
+structure with EDFbrowser's C. EDFbrowser's table was used to cross-check that
+all 228 resulting entries agree.
