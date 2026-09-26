@@ -17,7 +17,7 @@ Output is referential as stored, against REF. --montage writes the file's own
 display montage as bipolar traces instead.
 
 Usage:
-  python nicolet2edf.py INPUT.e OUTDIR [--segments 0,2-3] [--all-channels]
+  nicolet2edf INPUT.e OUTDIR [--segments 0,2-3] [--all-channels]
                                        [--concat] [--no-invert] [--montage]
                                        [--list] [--patient "X X X X"]
                                        [--no-sidecar]
@@ -25,13 +25,11 @@ Usage:
 import argparse
 import datetime as dt
 import os
-import sys
 
-import nicolet
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import edfcommon  # noqa: E402
+from .. import edfcommon
+from . import nicolet
 
 REC_SECS = edfcommon.REC_SECS
 _fld, _num = edfcommon._fld, edfcommon._num
@@ -256,8 +254,8 @@ def convert_clip(streams, header, pairs, out_path, start, offset_s, duration,
     return n_records, len(pairs)
 
 
-def write_sidecar(edf_path, header, pairs, clip, invert, applied):
-    """The metadata EDF itself has nowhere to put. See ../SIDECAR.md."""
+def build_sidecar(header, pairs, clip, invert, applied):
+    """The metadata EDF itself has nowhere to put. See SIDECAR.md."""
     channels = header["channels"]
     montage = header["montage"]
     pos = {c["label"]: i for i, c in enumerate(channels)}
@@ -306,7 +304,7 @@ def write_sidecar(edf_path, header, pairs, clip, invert, applied):
                          "offset_s": at, "duration_s": seg["duration"]})
         at += seg["duration"]
 
-    meta = edfcommon.build_sidecar(
+    return edfcommon.build_sidecar(
         source_file=os.path.basename(header["path"]),
         source_format="nicolet-nervus",
         clip={"index": clip[0], "start": clip[1].isoformat(),
@@ -325,10 +323,33 @@ def write_sidecar(edf_path, header, pairs, clip, invert, applied):
         events=[event(e) for e in header["events"]],
         polarity_inverted=invert,
     )
-    edfcommon.write_sidecar(edf_path, meta)
 
-def main():
-    ap = argparse.ArgumentParser()
+
+def write_sidecar(edf_path, header, pairs, clip, invert, applied):
+    edfcommon.write_sidecar(edf_path, build_sidecar(header, pairs, clip, invert, applied))
+
+
+def corrected(stored, invert):
+    """Stored int16 samples as uV-polarity digital values.
+
+    Corrected before any montage subtracts, so the arithmetic runs on true uV.
+    -32768 has no positive int16 counterpart: clamp, do not wrap.
+    """
+    return -np.clip(stored, -32767, None) if invert else stored
+
+
+def read_streams(path, header, channels, invert=True):
+    """{channel: corrected int16 stream} for each channel in `channels`."""
+    with open(path, "rb") as fh:
+        return {
+            c: corrected(np.frombuffer(nicolet.read_channel(fh, header, c), dtype="<i2"),
+                         invert)
+            for c in channels
+        }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="nicolet2edf")
     ap.add_argument("input")
     ap.add_argument("outdir", nargs="?")
     ap.add_argument("--segments", help="e.g. 0,2-3 (default: all)")
@@ -346,7 +367,7 @@ def main():
     ap.add_argument("--list", action="store_true", help="list segments and channels and exit")
     ap.add_argument("--patient", default="X X X X")
     ap.add_argument("--no-sidecar", action="store_true", help="skip the per-EDF .json metadata")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     header = nicolet.read_header(args.input)
     channels = header["channels"]
@@ -399,13 +420,7 @@ def main():
     need = sorted({a for _, a, _ in pairs} | {b for _, _, b in pairs if b is not None})
     invert = not args.no_invert
     print(f"reading {len(need)} channels", flush=True)
-    with open(args.input, "rb") as fh:
-        streams = {}
-        for c in need:
-            v = np.frombuffer(nicolet.read_channel(fh, header, c), dtype="<i2")
-            # Corrected before any montage subtracts, so the arithmetic runs on
-            # true uV. -32768 has no positive int16 counterpart: clamp, do not wrap.
-            streams[c] = -np.clip(v, -32767, None) if invert else v
+    streams = read_streams(args.input, header, need, invert)
 
     todo = clips(header, sel, args.concat)
     for done, clip in enumerate(todo, 1):

@@ -302,6 +302,30 @@ def read_channel(fh, header, ch):
     return raw
 
 
+def read_channel_range(fh, header, ch, lo, hi):
+    """Samples [lo, hi) of one channel's int16 stream, reading only the index
+    entries that overlap them -- the section is never contiguous on disk."""
+    n = header["channels"][ch]["n_samples"]
+    if not 0 <= lo <= hi <= n:
+        raise ValueError(f"channel {ch}: samples {lo}:{hi} outside 0:{n}")
+    want_lo, want_hi = lo * 2, hi * 2
+    out, at = bytearray(), 0
+    for off, size in header["sections"][header["channel_sections"][ch]]:
+        a, b = max(at, want_lo), min(at + size, want_hi)
+        if a < b:
+            fh.seek(off + a - at)
+            chunk = fh.read(b - a)
+            if len(chunk) < b - a:
+                raise EOFError(f"short read at {off + a - at}")
+            out += chunk
+        at += size
+        if at >= want_hi:
+            break
+    if len(out) != want_hi - want_lo:
+        raise ValueError(f"channel {ch}: section holds {at} bytes, needed {want_hi}")
+    return bytes(out)
+
+
 def segment_bounds(header, sfreq):
     """(start, stop) sample index per segment for a channel at `sfreq`."""
     out, at = [], 0

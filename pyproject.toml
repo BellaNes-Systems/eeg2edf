@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eeg2edf"
+dynamic = ["version"]
+description = "Read Nihon Kohden, Nicolet/Nervus and Micromed EEG recordings: lossless EDF+ conversion and MNE-Python readers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0 AND BSD-3-Clause"
+license-files = ["LICENSE", "NOTICE", "src/eeg2edf/micromed/LICENSE"]
+authors = [{ name = "BellaNes Systems" }]
+keywords = ["EEG", "EDF", "EDF+", "MNE", "Nihon Kohden", "Nicolet", "Nervus", "Micromed", "neurophysiology"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+mne = ["mne>=1.10"]
+test = ["pytest>=7", "mne>=1.10", "edfio"]
+
+[project.urls]
+Homepage = "https://github.com/BellaNes-Systems/eeg2edf"
+Issues = "https://github.com/BellaNes-Systems/eeg2edf/issues"
+
+[project.scripts]
+eeg2edf = "eeg2edf.cli:main"
+nk2edf = "eeg2edf.nihon_kohden.convert:main"
+nicolet2edf = "eeg2edf.nicolet.convert:main"
+vwr2edf = "eeg2edf.micromed.convert:main"
+eeg2edf-bipolar-mtg = "eeg2edf.tools.make_bipolar_mtg:main"
+
+[tool.hatch.version]
+path = "src/eeg2edf/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eeg2edf"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/eeg2edf",
+    "tests",
+    "docs",
+    "README.md",
+    "SIDECAR.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE",
+    "pyproject.toml",
+]
+# Recordings are patient data; never ship one, even by accident.
+exclude = ["*.EEG", "*.21E", "*.PNT", "*.LOG", "*.e", "*.vwr", "*.edf", "datasets", "data"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

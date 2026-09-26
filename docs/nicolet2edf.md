@@ -156,7 +156,7 @@ in EDFbrowser beside the same page in the Nicolet viewer (`Montage 2(2)`, 30 mm/
 
 **2. Against a recording whose polarity is already known** — this one needs no
 viewer and no display convention at all. `datasets/NicoletVEEG` is the same
-patient's scalp VEEG, converted by `../nk2edf`, whose output is true µV. Measure
+patient's scalp VEEG, converted by `nk2edf`, whose output is true µV. Measure
 one signed statistic on the frontal-minus-occipital trace in both recordings;
 only the *side* matters, since negating a signal flips the skew and turns an
 x% positive peak rate into (100−x)%:
@@ -220,37 +220,37 @@ The montage is recorded in the sidecar whether or not it is applied.
 ## Usage
 
 ```bash
-pip install numpy
+pip install eeg2edf
 ```
 
 ```bash
 # list segments, channels and events; convert nothing
-python nicolet2edf.py SAMPLE.e --list
+nicolet2edf SAMPLE.e --list
 
 # one EDF per segment, 31 EEG channels                    -> OUTDIR/SAMPLE_00_20210614091500.edf ...
-python nicolet2edf.py SAMPLE.e OUTDIR
+nicolet2edf SAMPLE.e OUTDIR
 
 # only some segments
-python nicolet2edf.py SAMPLE.e OUTDIR --segments 0,2-3
+nicolet2edf SAMPLE.e OUTDIR --segments 0,2-3
 
 # include the 1 Hz derived trend channels
-python nicolet2edf.py SAMPLE.e OUTDIR --all-channels
+nicolet2edf SAMPLE.e OUTDIR --all-channels
 
 # one glued file on the vendor timeline, joins annotated  -> OUTDIR/SAMPLE.edf
-python nicolet2edf.py SAMPLE.e OUTDIR --concat
+nicolet2edf SAMPLE.e OUTDIR --concat
 
 # the file's own bipolar display montage instead of referential channels
-python nicolet2edf.py SAMPLE.e OUTDIR --montage
+nicolet2edf SAMPLE.e OUTDIR --montage
 
 # write samples as stored, without the default negation (see Scaling and polarity)
-python nicolet2edf.py SAMPLE.e OUTDIR --no-invert
+nicolet2edf SAMPLE.e OUTDIR --no-invert
 
 # skip the per-EDF .json sidecar
-python nicolet2edf.py SAMPLE.e OUTDIR --no-sidecar
+nicolet2edf SAMPLE.e OUTDIR --no-sidecar
 ```
 
 `nicolet.py` also runs standalone as a structure dumper:
-`python nicolet.py SAMPLE.e`.
+`python -m eeg2edf.nicolet.nicolet SAMPLE.e`.
 
 ### Sidecar
 

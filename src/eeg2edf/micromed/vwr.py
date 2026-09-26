@@ -374,6 +374,17 @@ def iter_frames(header: Header, frames: int) -> Iterator[np.ndarray]:
             remaining -= take
 
 
+def read_frames(header: Header, start: int, stop: int) -> np.ndarray:
+    """Raw unsigned frames [start, stop) in source channel order."""
+    if not 0 <= start <= stop <= header.n_samples:
+        raise ValueError(f"frames {start}:{stop} outside 0:{header.n_samples}")
+    dtype = np.dtype(f"<u{header.int_size}")
+    with header.path.open("rb") as fh:
+        fh.seek(header.data_offset + start * header.order * header.int_size)
+        raw = _read_exact(fh, (stop - start) * header.order * header.int_size, "sample data")
+    return np.frombuffer(raw, dtype=dtype).reshape(stop - start, header.order)
+
+
 def calibrated(frames: np.ndarray, channels: tuple[Channel, ...]) -> np.ndarray:
     """Apply libvwr's per-channel physical calibration."""
     ground = np.asarray([c.lground for c in channels], dtype=np.float64)

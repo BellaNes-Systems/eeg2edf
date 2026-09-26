@@ -6,7 +6,7 @@ identified by label convention -- shaft letter, optional prime, number -- so
 auxiliary traces (DC*, REF*, MARK, UNUSED*) are left out automatically.
 
 Usage:
-    python make_bipolar_mtg.py INPUT.edf OUTPUT.mtg [--shafts G' L' A] [--ekg]
+    eeg2edf-bipolar-mtg INPUT.edf OUTPUT.mtg [--shafts G' L' A] [--ekg]
 """
 import argparse
 import re

@@ -5,7 +5,7 @@ annotations. --montage writes one of the file's stored montages as bipolar
 traces instead of the referential channels.
 
 Usage:
-  python vwr2edf.py INPUT.vwr OUTDIR [--montage NAME|auto] [--list]
+  vwr2edf INPUT.vwr OUTDIR [--montage NAME|auto] [--list]
                                      [--patient "X X X X"] [--no-sidecar]
 """
 
@@ -15,14 +15,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
-import vwr
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import edfcommon  # noqa: E402
+from .. import edfcommon
+from . import vwr
 
 REC_SECS = edfcommon.REC_SECS
 EQUIPMENT = "Micromed"
@@ -154,7 +152,7 @@ def _events(header: vwr.Header) -> list[tuple[float, str, float | None]]:
     return sorted(out)
 
 
-def _sidecar(
+def build_sidecar(
     source: vwr.Header,
     pairs: list[tuple[str, int, int | None]],
     labels: list[str],
@@ -262,7 +260,7 @@ def convert(
 
     if sidecar:
         edfcommon.write_sidecar(
-            output, _sidecar(source, pairs, labels, physical_min, physical_max, montage)
+            output, build_sidecar(source, pairs, labels, physical_min, physical_max, montage)
         )
     return len(pairs)
 
@@ -282,8 +280,20 @@ def _list(header: vwr.Header) -> None:
         print(f"  {marker.frame / header.frequency:10.3f}s  [{marker.source}] {marker.label}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def resolve_montage(header: vwr.Header, want: str) -> vwr.Montage:
+    """A stored montage by name, or 'auto' for the one HISTORY says was recorded."""
+    name = header.recorded_montage if want.lower() == "auto" else want
+    if name is None:
+        raise SystemExit("no montage recorded in HISTORY; pass --montage NAME instead")
+    montage = header.montage(name)
+    if montage is None:
+        raise SystemExit(f"no montage {name!r} -- available: "
+                         + ", ".join(repr(m.name) for m in header.montages))
+    return montage
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="vwr2edf", description=__doc__)
     parser.add_argument("input")
     parser.add_argument("outdir", nargs="?")
     parser.add_argument("--list", action="store_true", help="inspect the VWR file without writing")
@@ -291,7 +301,7 @@ def main() -> None:
     parser.add_argument("--montage", help="write a stored montage's traces instead of the "
                                           "referential channels; NAME or 'auto'")
     parser.add_argument("--no-sidecar", action="store_true", help="skip the JSON metadata sidecar")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     header = vwr.read_header(args.input)
     if args.list:
@@ -300,15 +310,7 @@ def main() -> None:
     if not args.outdir:
         raise SystemExit("outdir required (or use --list)")
 
-    montage = None
-    if args.montage:
-        want = header.recorded_montage if args.montage.lower() == "auto" else args.montage
-        if want is None:
-            raise SystemExit("no montage recorded in HISTORY; pass --montage NAME instead")
-        montage = header.montage(want)
-        if montage is None:
-            raise SystemExit(f"no montage {want!r} -- available: "
-                             + ", ".join(repr(m.name) for m in header.montages))
+    montage = resolve_montage(header, args.montage) if args.montage else None
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)

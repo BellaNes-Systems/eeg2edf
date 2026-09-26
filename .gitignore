@@ -16,3 +16,8 @@ data/
 *.e
 *.vwr
 *.edf
+
+# packaging
+dist/
+build/
+*.egg-info/

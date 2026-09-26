@@ -5,13 +5,13 @@ file, with every marker area exported as EDF+ annotations and the stored
 montages available as bipolar output. Standalone pure Python.
 
 ```bash
-pip install numpy
+pip install eeg2edf
 
-python vwr2edf.py INPUT.vwr --list
-python vwr2edf.py INPUT.vwr OUTDIR
-python vwr2edf.py INPUT.vwr OUTDIR --montage auto
-python vwr2edf.py INPUT.vwr OUTDIR --montage "Longit Bipolar T1 T2"
-python vwr2edf.py INPUT.vwr OUTDIR --patient "X X X X" --no-sidecar
+vwr2edf INPUT.vwr --list
+vwr2edf INPUT.vwr OUTDIR
+vwr2edf INPUT.vwr OUTDIR --montage auto
+vwr2edf INPUT.vwr OUTDIR --montage "Longit Bipolar T1 T2"
+vwr2edf INPUT.vwr OUTDIR --patient "X X X X" --no-sidecar
 ```
 
 The default output is `OUTDIR/INPUT.edf` plus `INPUT.json` -- the shared
@@ -91,8 +91,8 @@ artificial clips.
 ## Verification
 
 ```bash
-python test_vwr2edf.py          # synthetic reader/montage/marker/EDF tests
-python ../test_sidecar_schema.py  # sidecar schema shared with nk2edf/nicolet2edf
+pytest tests/test_vwr.py             # synthetic reader/montage/marker/EDF tests
+pytest tests/test_sidecar_schema.py  # sidecar schema shared with nk2edf/nicolet2edf
 ```
 
 Against a real 36-channel 256 Hz recording:
@@ -116,5 +116,5 @@ reference. Do not commit recordings, generated CSV dumps, or metadata.
 
 `vwr2edf` is licensed under the BSD 3-Clause License. It includes portions
 ported from `libvwr`, Copyright (C) Franco Milicchio, which are also subject to
-the BSD 3-Clause License. See [LICENSE](LICENSE) for the full terms and
+the BSD 3-Clause License. See [LICENSE](../src/eeg2edf/micromed/LICENSE) for the full terms and
 required notice.
