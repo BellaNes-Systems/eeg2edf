@@ -17,24 +17,21 @@ montages from .PTN, DC channel units from .11D, sex/birth date from .PNT,
 clinician bookmarks from .sld. Any of them may be absent.
 
 Usage:
-  python nk2edf.py INPUT.EEG OUTDIR [--blocks 0,1,5-9] [--all-channels]
-                                    [--ascii-labels] [--list] [--dump-log]
-                                    [--log PATH] [--no-log] [--annotations CSV]
-                                    [--no-mark-channel] [--montage NAME|auto]
-                                    [--no-sidecar]
+  nk2edf INPUT.EEG OUTDIR [--blocks 0,1,5-9] [--all-channels]
+                          [--ascii-labels] [--list] [--dump-log]
+                          [--log PATH] [--no-log] [--annotations CSV]
+                          [--no-mark-channel] [--montage NAME|auto]
+                          [--no-sidecar]
 """
 import argparse
 import datetime as dt
 import os
 import re
-import sys
 
-import nk
-import nkmeta
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import edfcommon  # noqa: E402
+from .. import edfcommon
+from . import nk, nkmeta
 
 REC_SECS = edfcommon.REC_SECS
 _fld, _num = edfcommon._fld, edfcommon._num
@@ -52,8 +49,10 @@ DC_PHYS_MIN = -12002.9
 EVENT_LABEL = "Events/Markers"
 
 # A bipolar trace spans twice the single-ended range, so montage output is
-# halved into the int16 digital range rather than clipped.
-BIPOLAR_PHYS_MAX = (EEG_PHYS_MAX - EEG_PHYS_MIN) / 2
+# halved into the int16 digital range rather than clipped -- and the physical
+# range doubles to match, so each halved word still reads as its true uV.
+BIPOLAR_PHYS_MIN = 2 * EEG_PHYS_MIN
+BIPOLAR_PHYS_MAX = 2 * EEG_PHYS_MAX
 
 _PLACEHOLDER = re.compile(r"^#\d+$")
 
@@ -180,16 +179,16 @@ def drop_bookmarked(log_events, marks, tol=dt.timedelta(milliseconds=2)):
     ]
 
 
-def convert_block(eeg_path, blk, out_path, keep, patient, recording, ascii_labels,
-                  events=(), keep_mark=True, dc_cal=None, montage=None):
-    dc_cal = dc_cal or {}
-    sfreq = blk["sfreq"]
-    n_ch_file = blk["n_channels"]
-    frame = n_ch_file + 1
-    n_records = blk["n_samples"] // (sfreq * REC_SECS)
+def block_start(blk):
+    return dt.datetime.strptime(blk["start"][:14], "%Y%m%d%H%M%S")
 
-    # One code path for both outputs: every signal is a pair (a, b) of file
-    # channel positions, and referential output simply has no b.
+
+def signal_pairs(blk, keep, ascii_labels=False, montage=None):
+    """(names, pairs) for the data signals, before the Events/Markers word.
+
+    Every signal is a pair (a, b) of file channel positions, and referential
+    output simply has no b -- one code path for both outputs.
+    """
     if montage:
         cols = montage_columns(montage, blk)
         names = [c[0] for c in cols]
@@ -210,11 +209,13 @@ def convert_block(eeg_path, blk, out_path, keep, patient, recording, ascii_label
         else:
             seen[n] = 0
         names[i] = n
+    return names, pairs
 
-    start = dt.datetime.strptime(blk["start"][:14], "%Y%m%d%H%M%S")
 
+def signal_specs(blk, keep, names, dc_cal, montage=None, keep_mark=True):
+    """(label, unit, phys_min, phys_max) per EDF data signal."""
     if montage:
-        signals = [(n, "uV", -BIPOLAR_PHYS_MAX, BIPOLAR_PHYS_MAX) for n in names]
+        signals = [(n, "uV", BIPOLAR_PHYS_MIN, BIPOLAR_PHYS_MAX) for n in names]
     else:
         signals = [
             signal_spec(names[i], blk["e21_index"][keep[i]], dc_cal)
@@ -222,6 +223,21 @@ def convert_block(eeg_path, blk, out_path, keep, patient, recording, ascii_label
         ]
     if keep_mark:
         signals.append((EVENT_LABEL, "", -1, 1))
+    return signals
+
+
+def convert_block(eeg_path, blk, out_path, keep, patient, recording, ascii_labels,
+                  events=(), keep_mark=True, dc_cal=None, montage=None):
+    dc_cal = dc_cal or {}
+    sfreq = blk["sfreq"]
+    n_ch_file = blk["n_channels"]
+    frame = n_ch_file + 1
+    n_records = blk["n_samples"] // (sfreq * REC_SECS)
+
+    names, pairs = signal_pairs(blk, keep, ascii_labels, montage)
+    start = block_start(blk)
+
+    signals = signal_specs(blk, keep, names, dc_cal, montage, keep_mark)
 
     per_record, annot_bytes = edfcommon.plan_annotations(events, n_records)
     header = build_header(
@@ -311,11 +327,10 @@ def read_annotation_csv(path):
     return events
 
 
-def write_sidecar(edf_path, source, blk, names, pairs, signals, e21, patient,
-                  montages, applied, events):
-    """The sidecar information EDF itself has nowhere to put. See ../SIDECAR.md."""
+def build_sidecar(source, blk, names, pairs, signals, e21, patient, montages, applied, events):
+    """The sidecar information EDF itself has nowhere to put. See SIDECAR.md."""
     dob = patient.get("dob")
-    start = dt.datetime.strptime(blk["start"][:14], "%Y%m%d%H%M%S")
+    start = block_start(blk)
     e21_index = blk["e21_index"]
 
     def channel(j):
@@ -333,7 +348,7 @@ def write_sidecar(edf_path, source, blk, names, pairs, signals, e21, patient,
             "derived": b is not None,
         }
 
-    return edfcommon.write_sidecar(edf_path, edfcommon.build_sidecar(
+    return edfcommon.build_sidecar(
         source_file=os.path.basename(source),
         source_format="nihon-kohden",
         clip={"index": None, "start": start.isoformat(), "offset_s": 0.0,
@@ -350,18 +365,130 @@ def write_sidecar(edf_path, source, blk, names, pairs, signals, e21, patient,
                            "reference": c["reference"],
                            "active_index": c["a"], "reference_index": c["b"]}
                           for c in m["channels"]]}
-            for m in montages
-            if len({c["label"] for c in m["channels"]}) > 1
+            for m in real_montages(montages)
         ],
         montage_applied=applied["name"] if applied else None,
         events=[{"onset_s": onset, "label": text, "type": "log", "source": "LOG"}
                 for onset, text in events],
         n_channels_in_file=blk["n_channels"],
-    ))
+    )
 
 
-def main():
-    ap = argparse.ArgumentParser()
+def write_sidecar(edf_path, *args):
+    """build_sidecar(*args), written next to `edf_path`."""
+    return edfcommon.write_sidecar(edf_path, build_sidecar(*args))
+
+
+def real_montages(montages):
+    """.PTN slots that are more than one repeated trace."""
+    return [m for m in montages if len({c["label"] for c in m["channels"]}) > 1]
+
+
+def load(eeg_path, *, all_channels=False, log=None, no_log=False, annotations=None,
+         notes=None):
+    """Everything about a recording except the samples, gathered once.
+
+    Every sidecar sharing the .EEG's stem is used when present. `notes`, when
+    given, collects the messages the CLI prints about what it found.
+    """
+    notes = notes if notes is not None else []
+    blocks = nk.read_blocks(eeg_path)
+    side = nkmeta.discover(eeg_path)
+    dc_cal = nkmeta.read_11d(side["11d"]) if "11d" in side else {}
+    patient = nkmeta.read_pnt(side["pnt"]) if "pnt" in side else {}
+    e21 = nkmeta.read_21e_sections(side["21e"]) if "21e" in side else {}
+    montages = (
+        nkmeta.read_ptn_dir(side["ptn"], nk.read_21e(side["21e"]), e21["reference"])
+        if "ptn" in side and "21e" in side
+        else []
+    )
+
+    if all_channels:
+        keep = list(range(blocks[0]["n_channels"]))
+    else:
+        keep = select_channels(blocks[0], dc_cal, nk.read_21e(side["21e"]))
+    if not keep:
+        raise SystemExit("no channels selected -- try --all-channels")
+
+    log_events = []
+    log_path = log or (None if no_log else default_log_path(eeg_path))
+    if log_path:
+        log_events = nk.read_log(log_path)
+        notes.append(f"{os.path.basename(log_path)}: {len(log_events)} log events")
+    elif not no_log:
+        notes.append("no .LOG found next to the .EEG -- converting without log annotations")
+    if annotations:
+        log_events += read_annotation_csv(annotations)
+    if "sld" in side:
+        marks = nkmeta.read_sld(side["sld"])
+        if marks:
+            notes.append(f"{os.path.basename(side['sld'])}: {len(marks)} clinician bookmarks")
+        before = len(log_events)
+        log_events = drop_bookmarked(log_events, marks) + marks
+        if before + len(marks) > len(log_events):
+            notes.append(f"  {before + len(marks) - len(log_events)} log entries also "
+                         "bookmarked; kept the bookmark's time")
+
+    return {
+        "path": eeg_path, "blocks": blocks, "side": side, "dc_cal": dc_cal,
+        "patient": patient, "e21": e21, "montages": montages,
+        "by_name": {m["name"]: m for m in montages}, "keep": keep,
+        "log_events": log_events,
+    }
+
+
+def block_events(rec, i, n_selected=1):
+    """(onset, text) per event inside block i, on the block's own timeline.
+
+    Events given in bare seconds are only meaningful when a single block is
+    being converted -- `n_selected` is how many are.
+    """
+    b = rec["blocks"][i]
+    log_events = rec["log_events"]
+    events = events_for_block(
+        [e for e in log_events if "when" in e], block_start(b), b["duration"]
+    )
+    relative = [(e["seconds"], e["text"]) for e in log_events if "seconds" in e]
+    if relative:
+        if n_selected != 1:
+            raise SystemExit(
+                "--annotations entries given in seconds are ambiguous when converting "
+                "more than one block; use ISO datetimes or --blocks with a single index"
+            )
+        events += [(s, t) for s, t in relative if 0 <= s < b["duration"]]
+    events.sort()
+    return events
+
+
+def resolve_montage(rec, i, want):
+    """Block i's montage: `want` is a .PTN name, or 'auto' to follow the .LOG."""
+    if want.lower() == "auto":
+        start = block_start(rec["blocks"][i])
+        want = nkmeta.montage_at(rec["log_events"], start, list(rec["by_name"]))
+        if not want:
+            raise SystemExit(
+                f"block {i}: the .LOG names no montage at {start}; "
+                "pass --montage NAME instead"
+            )
+    mont = rec["by_name"].get(want)
+    if mont is None:
+        raise SystemExit(
+            f"no montage {want!r} -- available: {', '.join(sorted(rec['by_name']))}"
+        )
+    return mont
+
+
+def patient_field(patient):
+    """EDF+ patient field: sex and birth date only, never name or record number."""
+    d = patient.get("dob")
+    if not d:
+        return "X X X X"
+    return (f"X {patient.get('sex') or 'X'} "
+            f"{d.day:02d}-{edfcommon.MONTHS[d.month - 1]}-{d.year} X")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="nk2edf")
     ap.add_argument("input")
     ap.add_argument("outdir", nargs="?")
     ap.add_argument("--blocks", help="e.g. 0,1,5-9 (default: all)")
@@ -396,58 +523,24 @@ def main():
     ap.add_argument(
         "--no-sidecar", action="store_true", help="skip the per-EDF .json metadata"
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
-    blocks = nk.read_blocks(args.input)
+    notes = []
+    rec = load(args.input, all_channels=args.all_channels, log=args.log,
+               no_log=args.no_log, annotations=args.annotations, notes=notes)
+    for line in notes:
+        print(line)
+    blocks, keep, side = rec["blocks"], rec["keep"], rec["side"]
+    e21, patient_info, log_events = rec["e21"], rec["patient"], rec["log_events"]
     n_file_ch = blocks[0]["n_channels"]
 
-    side = nkmeta.discover(args.input)
-    dc_cal = nkmeta.read_11d(side["11d"]) if "11d" in side else {}
-    patient_info = nkmeta.read_pnt(side["pnt"]) if "pnt" in side else {}
-    e21 = nkmeta.read_21e_sections(side["21e"]) if "21e" in side else {}
-    montages = (
-        nkmeta.read_ptn_dir(side["ptn"], nk.read_21e(side["21e"]), e21["reference"])
-        if "ptn" in side and "21e" in side
-        else []
-    )
-    by_name = {m["name"]: m for m in montages}
-
-    if args.all_channels:
-        keep = list(range(n_file_ch))
-    else:
-        keep = select_channels(blocks[0], dc_cal, nk.read_21e(side["21e"]))
-    if not keep:
-        raise SystemExit("no channels selected -- try --all-channels")
-
-    # EDF+ patient field: sex and birth date only, never name or record number.
-    if args.patient == "X X X X" and patient_info.get("dob"):
-        d = patient_info["dob"]
-        args.patient = f"X {patient_info.get('sex') or 'X'} " \
-                       f"{d.day:02d}-{edfcommon.MONTHS[d.month - 1]}-{d.year} X"
-
-    log_events = []
-    log_path = args.log or (None if args.no_log else default_log_path(args.input))
-    if log_path:
-        log_events = nk.read_log(log_path)
-        print(f"{os.path.basename(log_path)}: {len(log_events)} log events")
-    elif not args.no_log:
-        print("no .LOG found next to the .EEG -- converting without log annotations")
-    if args.annotations:
-        log_events += read_annotation_csv(args.annotations)
-    if "sld" in side:
-        marks = nkmeta.read_sld(side["sld"])
-        if marks:
-            print(f"{os.path.basename(side['sld'])}: {len(marks)} clinician bookmarks")
-        before = len(log_events)
-        log_events = drop_bookmarked(log_events, marks) + marks
-        if before + len(marks) > len(log_events):
-            print(f"  {before + len(marks) - len(log_events)} log entries also "
-                  "bookmarked; kept the bookmark's time")
+    if args.patient == "X X X X":
+        args.patient = patient_field(patient_info)
 
     if args.dump_log:
         placed = 0
         for i, b in enumerate(blocks):
-            start = dt.datetime.strptime(b["start"][:14], "%Y%m%d%H%M%S")
+            start = block_start(b)
             evs = events_for_block(log_events, start, b["duration"])
             placed += len(evs)
             if evs:
@@ -472,7 +565,7 @@ def main():
         if patient_info.get("dob"):
             print(f"patient: sex {patient_info.get('sex')}  born {patient_info['dob']}"
                   f"  age at recording {patient_info.get('age')}")
-        real = [m for m in montages if len({c["label"] for c in m["channels"]}) > 1]
+        real = real_montages(rec["montages"])
         if real:
             print(f"montages ({len(real)}): "
                   + ", ".join(f"{m['name']}[{len(m['channels'])}]" for m in real))
@@ -496,44 +589,17 @@ def main():
         out = os.path.join(args.outdir, f"{stem}_{i:02d}_{b['start'][:14]}.edf")
         d = dt.datetime.strptime(b["start"][:8], "%Y%m%d")
         recording = edfcommon.recording_field(d, stem, "JE-120A/225A")
-        block_start = dt.datetime.strptime(b["start"][:14], "%Y%m%d%H%M%S")
-        events = events_for_block(
-            [e for e in log_events if "when" in e], block_start, b["duration"]
-        )
-        relative = [(e["seconds"], e["text"]) for e in log_events if "seconds" in e]
-        if relative:
-            if len(sel) != 1:
-                raise SystemExit(
-                    "--annotations entries given in seconds are ambiguous when converting "
-                    "more than one block; use ISO datetimes or --blocks with a single index"
-                )
-            events += [(s, t) for s, t in relative if 0 <= s < b["duration"]]
-        events.sort()
-
-        mont = None
-        if args.montage:
-            want = args.montage
-            if want.lower() == "auto":
-                want = nkmeta.montage_at(log_events, block_start, list(by_name))
-                if not want:
-                    raise SystemExit(
-                        f"block {i}: the .LOG names no montage at {block_start}; "
-                        "pass --montage NAME instead"
-                    )
-            mont = by_name.get(want)
-            if mont is None:
-                raise SystemExit(
-                    f"no montage {want!r} -- available: {', '.join(sorted(by_name))}"
-                )
+        events = block_events(rec, i, len(sel))
+        mont = resolve_montage(rec, i, args.montage) if args.montage else None
 
         nrec, names, pairs, signals, start = convert_block(
             args.input, b, out, keep, args.patient, recording,
             args.ascii_labels, events=events, keep_mark=not args.no_mark_channel,
-            dc_cal=dc_cal, montage=mont,
+            dc_cal=rec["dc_cal"], montage=mont,
         )
         if not args.no_sidecar:
             write_sidecar(out, args.input, b, names, pairs, signals, e21,
-                          patient_info, montages, mont, events)
+                          patient_info, rec["montages"], mont, events)
         size = os.path.getsize(out)
         print(
             f"[{i:2d}/{len(blocks)-1}] {os.path.basename(out)}  "

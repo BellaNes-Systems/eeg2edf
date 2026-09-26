@@ -1,114 +1,20 @@
+import io
 import json
-import struct
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
+from synth import write_vwr
 
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
-
-import vwr
-import vwr2edf
-
-sys.path.insert(0, str(HERE.parent))
-import edfcommon
+from eeg2edf import edfcommon
+from eeg2edf.micromed import convert as vwr2edf
+from eeg2edf.micromed import vwr
 
 try:
     import edfio
 except ImportError:
     edfio = None
-
-# LABCOD 0 is the recording ground, as in a real file: a montage input of 0
-# means "this channel's own ground".
-LABCOD = (
-    (b"G2", b"", 0, 0, 256),
-    (b"A", b"REF", 100, 0, 256),
-    (b"B", b"REF", 50, 0, 256),
-)
-MONTAGES = (
-    ("Bipolar", ((2, 1), (0, 2))),   # A-B, then B against its own ground
-    ("Ground", ((0, 1),)),
-)
-
-
-def _montage_block(name, traces):
-    block = bytearray(vwr.MONTAGE_SIZE)
-    struct.pack_into("<4H", block, 0, len(traces), 0, 10, 1)
-    block[vwr.MONTAGE_NAME:vwr.MONTAGE_NAME + len(name)] = name.encode()
-    for index, (reference, active) in enumerate(traces):
-        struct.pack_into("<2H", block, vwr.MONTAGE_INPUTS + index * 4, reference, active)
-    return bytes(block)
-
-
-def write_vwr(path, width=2):
-    order, rate = 2, 4
-    sizes = [
-        ("ORDER", vwr.ORDER_SIZE),
-        ("MONTAGE", len(MONTAGES) * vwr.MONTAGE_SIZE),
-        ("LABCOD", len(LABCOD) * vwr.LABCOD_SIZE),
-        ("NOTE", vwr.NOTE_COUNT * vwr.NOTE_SIZE),
-        ("HISTORY", vwr.HISTORY_TIMES + vwr.MONTAGE_SIZE),
-        ("TRIGGER", 8 * vwr.TRIGGER_SIZE),
-        ("TRONCA", 2 * vwr.TRONCA_SIZE),
-        ("FLAGS", vwr.FLAGS_SIZE),
-        ("EVENT A", vwr.EVENT_NAME_SIZE + vwr.EVENT_COUNT * 8),
-    ]
-    offsets, at = {}, vwr.HEADER_SIZE
-    for name, size in sizes:
-        offsets[name] = at
-        at += size
-    data_offset = at
-
-    header = bytearray(vwr.HEADER_SIZE)
-    header[:16] = b"Micromed VWR\x1a".ljust(16, b"\0")
-    header[128:134] = bytes((2, 1, 124, 3, 4, 5))
-    struct.pack_into("<I", header, 138, data_offset)
-    struct.pack_into("<H", header, 142, order)
-    struct.pack_into("<H", header, 146, rate)
-    struct.pack_into("<H", header, 148, width)
-    header[175] = 4
-    for index, (name, size) in enumerate(sizes):
-        slot = vwr.SEGMENT_FIRST + index * vwr.SEGMENT_SIZE
-        header[slot:slot + 8] = name.encode().ljust(8, b"\0")
-        struct.pack_into("<II", header, slot + 8, offsets[name], size)
-
-    order_table = struct.pack("<256H", 2, 1, *([0] * 254))
-    montage = b"".join(_montage_block(name, traces) for name, traces in MONTAGES)
-    labcod = bytearray(len(LABCOD) * vwr.LABCOD_SIZE)
-    for index, (label, ground, lground, pmin, pmax) in enumerate(LABCOD):
-        slot = index * vwr.LABCOD_SIZE
-        struct.pack_into("<BB", labcod, slot, 1, 0)
-        labcod[slot + 2:slot + 8] = label.ljust(6, b"\0")
-        labcod[slot + 8:slot + 14] = ground.ljust(6, b"\0")
-        struct.pack_into("<iiiii", labcod, slot + 14, 0, 255, lground, pmin, pmax)
-        struct.pack_into("<h", labcod, slot + 34, 0)
-    notes = bytearray(vwr.NOTE_COUNT * vwr.NOTE_SIZE)
-    notes[4:9] = b"start"  # frame 0, which the reader used to drop
-    struct.pack_into("<I", notes, vwr.NOTE_SIZE, 2)
-    notes[vwr.NOTE_SIZE + 4:vwr.NOTE_SIZE + 9] = b"onset"
-    # HISTORY names the montage the recording was made with.
-    history = b"\xff" * vwr.HISTORY_TIMES + _montage_block(*MONTAGES[1])
-    trigger = struct.pack("<IH", 1, 7) + b"\xff\xff\xff\xff\x00\x00" * 7
-    tronca = struct.pack("<4I", 10, 0, 20, 2)
-    flags = struct.pack("<2I", 0, 2)
-    event_a = b"Seizure".ljust(vwr.EVENT_NAME_SIZE, b"\0")
-    event_a += struct.pack(f"<{vwr.EVENT_COUNT}I", 1, *([0] * (vwr.EVENT_COUNT - 1)))
-    event_a += struct.pack(f"<{vwr.EVENT_COUNT}I", 3, *([0] * (vwr.EVENT_COUNT - 1)))
-
-    values = np.array([[51, 101], [52, 102], [53, 103], [54, 104]], dtype=f"<u{width}")
-    blocks = {"ORDER": order_table, "MONTAGE": montage, "LABCOD": bytes(labcod),
-              "NOTE": bytes(notes), "HISTORY": history, "TRIGGER": trigger,
-              "TRONCA": tronca, "FLAGS": flags, "EVENT A": event_a}
-    with open(path, "wb") as fh:
-        fh.write(header)
-        for name, size in sizes:
-            assert len(blocks[name]) == size, name
-            fh.write(blocks[name])
-        fh.write(values.tobytes())
-    return values
 
 
 class VwrReaderTest(unittest.TestCase):
@@ -183,10 +89,13 @@ class VwrMontageTest(unittest.TestCase):
         self.assertEqual(meta["montage_applied"], "Bipolar")
         self.assertEqual([c["derived"] for c in meta["channels"]], [True, False])
         if edfio:
-            edf = edfio.read_edf(output)
+            edf = edfio.read_edf(io.BytesIO(output.read_bytes()))
             self.assertEqual(edf.labels, ("A-B", "B-REF"))
             # Both channels calibrate to 1..4, so their difference is flat zero.
-            np.testing.assert_allclose(edf.signals[0].data, [0, 0, 0, 0], atol=0.11)
+            # A-B spans twice a 16-bit channel's range in int16, so it is exact
+            # only to one output LSB -- the sidecar records how big that is.
+            lsb = meta["channels"][0]["resolution_uv_per_lsb"]
+            np.testing.assert_allclose(edf.signals[0].data, [0, 0, 0, 0], atol=lsb)
             np.testing.assert_allclose(edf.signals[1].data, [1, 2, 3, 4], atol=0.01)
 
     def test_unknown_montage_is_rejected(self):
@@ -252,7 +161,7 @@ class VwrEdfTest(unittest.TestCase):
             self.assertEqual(json.dumps(metadata["patient"]),
                              json.dumps({"sex": None, "dob": None, "age_at_recording": None}))
             if edfio:
-                edf = edfio.read_edf(output)
+                edf = edfio.read_edf(io.BytesIO(output.read_bytes()))
                 self.assertEqual(edf.labels, ("B-REF", "A-REF"))
                 np.testing.assert_allclose(edf.signals[0].data, [1, 2, 3, 4], atol=1.1)
                 np.testing.assert_allclose(edf.signals[1].data, [1, 2, 3, 4], atol=1.1)
@@ -269,7 +178,7 @@ class VwrEdfTest(unittest.TestCase):
             object.__setattr__(header, "frequency", 8)
             vwr2edf.convert(header, output, "X X X X", sidecar=False)
             if edfio:
-                edf = edfio.read_edf(output)
+                edf = edfio.read_edf(io.BytesIO(output.read_bytes()))
                 np.testing.assert_allclose(edf.signals[0].data[4:], 0, atol=0.11)
 
 

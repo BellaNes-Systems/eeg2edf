@@ -1,8 +1,8 @@
 """EDF+ header/annotation helpers and the sidecar schema shared by the converters.
 
 nk2edf, nicolet2edf and vwr2edf each held their own copy of these; they now
-import this module by adding the repository root to sys.path. build_header and signal_spec
-stay per-tool -- those legitimately differ per format. See SIDECAR.md.
+share this module. build_header and signal_spec stay per-tool -- those
+legitimately differ per format. See SIDECAR.md.
 """
 import json
 import os

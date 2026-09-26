@@ -2,8 +2,9 @@
 
 `nk2edf`, `nicolet2edf` and `vwr2edf` each write `OUTPUT.json` next to `OUTPUT.edf`,
 holding what the source format records and EDF has nowhere to put. All three emit
-the same schema, built by `edfcommon.build_sidecar`, so one reader handles every
-converter.
+the same schema, built by `eeg2edf.edfcommon.build_sidecar`, so one reader handles
+every converter. The MNE readers carry the same document in the Raw -- see
+[In MNE-Python](#in-mne-python).
 
 Every key below is always present. A format with no such concept emits `null`
 or `[]` rather than dropping the key. Format-specific extras are appended after
@@ -72,7 +73,30 @@ null when the event falls outside the clip), `duration_s`, `label`, `type`,
 | `channels[]` extras | -- | `active_sensor`, `trend` | `lmin`, `lmax`, `lground`, `pmin`, `pmax`, `factor`, `units` |
 | `events[]` extras | -- | `when`, `stream_s`, `guid` | `frame` |
 
+## In MNE-Python
+
+`eeg2edf.read_raw` and the per-format readers build the sidecar with the same
+code as the converters, for the referential channels, and store it as JSON in
+`raw.info["description"]`. `eeg2edf.mne.get_sidecar(raw)` returns it as a dict;
+it survives a FIF save/load. Differences from the converter's file:
+
+- `channels[]` gains `ch_name`, the channel's name in the Raw. It can differ
+  from `label`: Nihon Kohden's built-in "EEG FP1" becomes "Fp1", and Micromed
+  channels are named by electrode ("Fp1", with the ground as `reference`)
+  rather than "Fp1-G2".
+- `clip.index` is the Nihon Kohden block read (the EDF writes `null`). The Raw
+  holds the whole block, including a final partial second the EDF's 1 s
+  records drop.
+- `block="all"` (Nihon Kohden) turns each block into a `segments[]` entry and
+  moves event onsets onto the joined timeline.
+- `apply_montage` replaces `channels[]` with the montage's traces and sets
+  `montage_applied`.
+
+Events become `raw.annotations`. Those with a null `onset_s` (outside the clip,
+or between Nicolet segments) stay in the sidecar only.
+
 ## Tests
 
-`python test_sidecar_schema.py` drives all three `write_sidecar` implementations
-over synthetic inputs and asserts they agree on the schema.
+`tests/test_sidecar_schema.py` drives all three `write_sidecar` implementations
+over synthetic inputs and asserts they agree on the schema;
+`tests/test_mne.py` does the same for the MNE readers.

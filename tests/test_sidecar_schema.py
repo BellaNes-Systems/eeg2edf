@@ -1,22 +1,17 @@
 """Every converter's sidecar must be the same shape. See SIDECAR.md."""
 import datetime as dt
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).parent
-for sub in ("", "nk2edf", "nicolet2edf", "vwr2edf"):
-    sys.path.insert(0, str(HERE / sub))
+from synth import write_vwr
 
-import edfcommon
-import nicolet2edf
-import nk2edf
-import vwr2edf
-from test_vwr2edf import write_vwr
-
-import vwr
+from eeg2edf import edfcommon
+from eeg2edf.micromed import convert as vwr2edf
+from eeg2edf.micromed import vwr
+from eeg2edf.nicolet import convert as nicolet2edf
+from eeg2edf.nihon_kohden import convert as nk2edf
 
 TOP = ["schema", "source", "clip", "device", "reference", "patient",
        "channels", "montages", "montage_applied", "segments", "events"]

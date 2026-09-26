@@ -193,20 +193,19 @@ bytes, as before), so a dense log cannot overflow it.
 ## Usage
 
 ```bash
-pip install numpy                      # required
-pip install pyedflib                   # optional, for validation only
+pip install eeg2edf
 
-python nk2edf.py INPUT.EEG --dump-log              # check log parsing FIRST
-python nk2edf.py INPUT.EEG --list                  # inventory, no writes
-python nk2edf.py INPUT.EEG OUTDIR                  # all clips, with annotations
-python nk2edf.py INPUT.EEG OUTDIR --blocks 0,3,17-20
-python nk2edf.py INPUT.EEG OUTDIR --ascii-labels   # G'1 -> Gp1
-python nk2edf.py INPUT.EEG OUTDIR --all-channels
-python nk2edf.py INPUT.EEG OUTDIR --no-log         # ignore the .LOG
-python nk2edf.py INPUT.EEG OUTDIR --annotations events.csv
-python nk2edf.py INPUT.EEG OUTDIR --montage EMU1   # bipolar traces
-python nk2edf.py INPUT.EEG OUTDIR --montage auto   # montage the .LOG names
-python nk2edf.py INPUT.EEG OUTDIR --no-sidecar     # skip the .json
+nk2edf INPUT.EEG --dump-log              # check log parsing FIRST
+nk2edf INPUT.EEG --list                  # inventory, no writes
+nk2edf INPUT.EEG OUTDIR                  # all clips, with annotations
+nk2edf INPUT.EEG OUTDIR --blocks 0,3,17-20
+nk2edf INPUT.EEG OUTDIR --ascii-labels   # G'1 -> Gp1
+nk2edf INPUT.EEG OUTDIR --all-channels
+nk2edf INPUT.EEG OUTDIR --no-log         # ignore the .LOG
+nk2edf INPUT.EEG OUTDIR --annotations events.csv
+nk2edf INPUT.EEG OUTDIR --montage EMU1   # bipolar traces
+nk2edf INPUT.EEG OUTDIR --montage auto   # montage the .LOG names
+nk2edf INPUT.EEG OUTDIR --no-sidecar     # skip the .json
 ```
 
 Requires the `.21E` file next to the `.EEG` for electrode labels; everything
