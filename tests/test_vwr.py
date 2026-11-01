@@ -198,7 +198,9 @@ class VwrPrecisionTest(unittest.TestCase):
     """Which sample widths survive int16 EDF exactly, and how close 32-bit gets."""
 
     def convert(self, width, patch=None):
-        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directory = Path(tmp.name)
         path = directory / "record.vwr"
         values = write_vwr(path, width).copy()
         if patch is not None:
