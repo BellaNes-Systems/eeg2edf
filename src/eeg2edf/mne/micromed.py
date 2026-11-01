@@ -20,7 +20,10 @@ class RawMicromed(EEG2EDFRaw):
             header = vwr.read_header(fname)
             pairs = convert.referential_pairs(header)
             edf_labels = convert._unique_labels([label for label, _a, _b in pairs])
-            low, high = convert._signal_ranges(header, pairs)
+            # No sample scan, so opening stays lazy: for 32-bit files the
+            # sidecar's EDF resolution then assumes data within lmin..lmax.
+            # This reader's own data path is exact regardless.
+            low, high = convert._signal_ranges(header, pairs, scan=False)
             meta = convert.build_sidecar(header, pairs, edf_labels, low, high, None)
         meta["clip"]["index"] = None
         meta["clip"]["offset_s"] = 0.0

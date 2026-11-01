@@ -184,3 +184,79 @@ class VwrEdfTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _edf_digital(path: Path, n_signals: int, n_samples: int) -> np.ndarray:
+    """The data signals' digital values from a one-record EDF, (samples, signals)."""
+    raw = path.read_bytes()
+    start = 256 * (n_signals + 2)  # data signals + EDF Annotations
+    data = np.frombuffer(raw, dtype="<i2", count=n_signals * n_samples, offset=start)
+    return data.reshape(n_signals, n_samples).T
+
+
+class VwrPrecisionTest(unittest.TestCase):
+    """Which sample widths survive int16 EDF exactly, and how close 32-bit gets."""
+
+    def convert(self, width, patch=None):
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        path = directory / "record.vwr"
+        values = write_vwr(path, width).copy()
+        if patch is not None:
+            frame, channel, value = patch
+            values[frame, channel] = value
+            with open(path, "r+b") as fh:
+                fh.seek(-values.nbytes, 2)
+                fh.write(values.tobytes())
+        header = vwr.read_header(path)
+        output = directory / "record.edf"
+        vwr2edf.convert(header, output, "X X X X", True)
+        meta = json.loads(output.with_suffix(".json").read_text())
+        return header, values, _edf_digital(output, header.order, header.n_samples), meta
+
+    def test_8_and_16_bit_are_exact(self):
+        for width, expected in ((1, lambda v: 257 * v - 32768), (2, lambda v: v - 32768)):
+            with self.subTest(width=width):
+                header, values, digital, meta = self.convert(width)
+                np.testing.assert_array_equal(digital, expected(values.astype(np.int64)))
+                for c in meta["channels"]:
+                    self.assertLessEqual(c["resolution_uv_per_lsb"], c["factor"] * (1 + 1e-9))
+
+    def assert_within_half_lsb(self, header, values, digital, meta):
+        low, high = vwr2edf._channel_ranges(header)
+        lsb = (high - low) / 65535
+        physical = low + (digital.astype(np.float64) + 32768) * lsb
+        np.testing.assert_allclose(physical, vwr.calibrated(values, header.channels),
+                                   rtol=0, atol=float(lsb.max()) / 2 + 1e-9)
+        np.testing.assert_allclose([c["resolution_uv_per_lsb"] for c in meta["channels"]], lsb)
+
+    def test_32_bit_keeps_the_calibration_range_resolution(self):
+        header, values, digital, meta = self.convert(4)
+        self.assert_within_half_lsb(header, values, digital, meta)
+        # lmin..lmax is 0..255, so 2^16 EDF steps resolve every stored step;
+        # the full 32-bit range would make each EDF step 65,537 stored steps.
+        for c in meta["channels"]:
+            self.assertLessEqual(c["resolution_uv_per_lsb"], c["factor"])
+
+    def test_32_bit_outside_the_calibration_range_is_not_clipped(self):
+        header, values, digital, meta = self.convert(4, patch=(3, 0, 100000))
+        self.assert_within_half_lsb(header, values, digital, meta)
+        # The range widened to the outlier, which is now its top step -- and
+        # the half-LSB check above shows it reads back at its true value.
+        self.assertEqual(digital[3, 0], 32767)
+        self.assertGreater(meta["channels"][0]["resolution_uv_per_lsb"],
+                           meta["channels"][1]["resolution_uv_per_lsb"])
+
+
+class VwrListTest(unittest.TestCase):
+    def test_list_reports_width_and_precision(self):
+        for width in (2, 4):
+            with self.subTest(width=width), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "record.vwr"
+                write_vwr(path, width)
+                out = io.StringIO()
+                from contextlib import redirect_stdout
+                with redirect_stdout(out):
+                    vwr2edf.main([str(path), "--list"])
+                text = out.getvalue()
+                self.assertIn(f"{width * 8}-bit samples", text)
+                self.assertEqual(text.count(" exact"), 2)

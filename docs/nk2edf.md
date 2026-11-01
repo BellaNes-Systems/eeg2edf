@@ -131,7 +131,10 @@ channels; `--montage auto` uses whichever pattern the `.LOG` names at each
 block's start. An electrode the recording does not carry contributes zero, which
 is how `0V-EKG1` comes out as `-EKG1`. A bipolar trace spans twice the
 single-ended range, so montage output is halved into the int16 digital range
-(±6400 µV full scale) rather than clipped.
+(±6400 µV full scale) rather than clipped. Every trace of a montage is halved,
+including one with a single electrode such as `-EKG1`, so montage output is
+quantised to twice the referential LSB (0.1953125 µV) — within half that step.
+Referential output stays exact.
 
 ## Channel selection
 

@@ -1,6 +1,6 @@
 # eeg2edf
 
-Readers for proprietary clinical EEG formats: lossless converters to **EDF+**
+Readers for proprietary clinical EEG formats: converters to **EDF+**
 with a JSON sidecar carrying the metadata EDF+ has nowhere to put, and
 **MNE-Python** readers that open the same recordings directly as `mne.io.Raw`.
 
@@ -10,9 +10,11 @@ with a JSON sidecar carrying the metadata EDF+ has nowhere to put, and
 | Nicolet / Nervus `.e` | `nicolet2edf` | `read_raw_nicolet` | one EDF+C per stored segment; `--concat` for the vendor timeline |
 | Micromed VWR / Brain-Quick `.vwr` | `vwr2edf` | `read_raw_micromed` | montage, events and trigger tracks decoded |
 
-All three converters are lossless: the EDF digital range is the stored range,
-so sample values round-trip exactly. The MNE readers hand MNE the same stored
-integers with their exact calibration.
+Referential output from 8- and 16-bit sources is lossless: the EDF digital
+range is the stored range, so sample values round-trip exactly. 32-bit Micromed
+samples and `--montage` traces have to be re-quantised to fit EDF's 16 bits —
+see [Precision](#precision-what-is-lossless). The MNE readers are exact in every
+case: they hand MNE the stored integers with their exact calibration.
 
 ## Why
 
@@ -45,6 +47,32 @@ Every tool takes `--list` to report what a file contains without converting, and
 
 `eeg2edf-bipolar-mtg` is a small extra: it emits an EDFbrowser `.mtg` montage
 from an SEEG EDF.
+
+## Precision: what is lossless
+
+EDF stores every sample as a 16-bit integer (an LSB is one integer step). An
+output is exact when each stored value gets its own EDF step. It is quantised
+when the source needs more than 16 bits, and then the EDF keeps the nearest
+step, within half an output LSB.
+
+| Input / option | EDF output |
+|---|---|
+| Nihon Kohden, referential (EEG, DC, event word) | exact |
+| Nicolet, referential | exact. The default polarity flip maps a stored −32768, which has no positive int16, to +32767; `--no-invert` is exact for every value |
+| Micromed, 8- or 16-bit samples, referential | exact |
+| Micromed, 32-bit samples | quantised: the channel's calibration range `lmin..lmax`, widened to the values actually stored, spread over 65,536 steps. Nothing is clipped |
+| `--montage`, a trace that subtracts two channels (all three tools) | quantised: the difference needs 17 bits, so the output LSB is twice the source LSB |
+| `--montage`, a single-channel trace | Nicolet (`EKG-Bipolar`) and Micromed (ground-referenced, `ECG1+`): exact. **Nihon Kohden: halved like the rest** (`-EKG1`) |
+| MNE readers, `apply_montage` | exact; montages are computed in float64 and never re-quantised |
+
+The sidecar shows the boundary per channel. `resolution_uv_per_lsb` is the EDF
+step in µV, in full precision; the EDF header holds the same gain in 8 ASCII
+characters, rounded to within a few percent of an LSB. A channel is exact when
+that step is no larger than the source's own: the `factor` field for Micromed,
+the referential resolution for Nihon Kohden and Nicolet, where `derived: true`
+traces are twice as coarse. To see it before converting, `nicolet2edf --list`
+prints each channel's resolution, and `vwr2edf --list` prints the sample width
+and, per channel, the EDF step and `exact` or how many times coarser it is.
 
 ## Read with MNE-Python
 

@@ -62,18 +62,40 @@ def referential_pairs(header: vwr.Header) -> list[tuple[str, int, int | None]]:
     return [(channel.name, position, None) for position, channel in enumerate(header.channels)]
 
 
-def _channel_ranges(header: vwr.Header) -> tuple[np.ndarray, np.ndarray]:
-    """Physical span of each source channel over the full stored integer range."""
-    raw_max = (1 << (header.int_size * 8)) - 1
-    mins = np.asarray([-c.lground * c.factor for c in header.channels], dtype=float)
-    maxs = np.asarray([(raw_max - c.lground) * c.factor for c in header.channels], dtype=float)
+def _stored_span(header: vwr.Header, scan: bool) -> tuple[np.ndarray, np.ndarray]:
+    """The stored-integer interval each channel's EDF signal has to cover.
+
+    1- and 2-byte samples use the full integer range: 2^16 EDF steps can hold
+    every stored value, so referential output is exact. 32-bit samples cannot
+    fit, and spreading 2^32 values over 2^16 steps would keep one in 65,537.
+    They use the calibration range lmin..lmax instead, widened to the values
+    actually stored (with `scan`) so nothing is clipped.
+    """
+    n = len(header.channels)
+    if header.int_size < 4:
+        raw_max = (1 << (header.int_size * 8)) - 1
+        return np.zeros(n), np.full(n, float(raw_max))
+    lo = np.asarray([min(c.lmin, c.lmax) for c in header.channels], dtype=float)
+    hi = np.asarray([max(c.lmin, c.lmax) for c in header.channels], dtype=float)
+    observed = vwr.stored_range(header) if scan else None
+    if observed is not None:
+        lo, hi = np.minimum(lo, observed[0]), np.maximum(hi, observed[1])
+    return lo, hi
+
+
+def _channel_ranges(header: vwr.Header, scan: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """Physical span of each source channel over its stored-integer interval."""
+    lo, hi = _stored_span(header, scan)
+    lground = np.asarray([c.lground for c in header.channels], dtype=float)
+    factor = np.asarray([c.factor for c in header.channels], dtype=float)
+    mins, maxs = (lo - lground) * factor, (hi - lground) * factor
     return np.minimum(mins, maxs), np.maximum(mins, maxs)
 
 
 def _signal_ranges(
-    header: vwr.Header, pairs: list[tuple[str, int, int | None]]
+    header: vwr.Header, pairs: list[tuple[str, int, int | None]], scan: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
-    low, high = _channel_ranges(header)
+    low, high = _channel_ranges(header, scan)
     mins, maxs = [], []
     for _label, a, b in pairs:
         mins.append(low[a] - (high[b] if b is not None else 0.0))
@@ -265,17 +287,28 @@ def convert(
     return len(pairs)
 
 
+def _precision(source_lsb: float, edf_lsb: float) -> str:
+    """'exact' when one EDF step is no coarser than one stored step."""
+    ratio = edf_lsb / abs(source_lsb) if source_lsb else float("inf")
+    return "exact" if ratio <= 1 + 1e-9 else f"x{ratio:.4g} coarser"
+
+
 def _list(header: vwr.Header) -> None:
     print(f"{header.path}  {header.size / 1e6:.1f} MB")
     print(f"{header.order} channels, {header.frequency} Hz, {header.duration:.3f} s, "
-          f"{len(header.markers)} markers, {len(header.parts)} parts")
+          f"{len(header.markers)} markers, {len(header.parts)} parts, "
+          f"{header.int_size * 8}-bit samples")
+    low, high = _signal_ranges(header, referential_pairs(header))
+    edf_lsb = (high - low) / 65535
     for montage in header.montages:
         mark = "*" if montage.name == header.recorded_montage else " "
         print(f"{mark}montage {montage.name!r}, {len(montage.traces)} traces: "
               + ", ".join(trace.label for trace in montage.traces))
     for index, channel in enumerate(header.channels):
         print(f"{index:3d} {channel.name:<16} L={channel.lmin}:{channel.lmax} "
-              f"G={channel.lground} factor={channel.factor:g}")
+              f"G={channel.lground} factor={channel.factor:g}  "
+              f"edf={edf_lsb[index]:.6g} uV/LSB "
+              f"{_precision(channel.factor, edf_lsb[index])}")
     for marker in header.markers:
         print(f"  {marker.frame / header.frequency:10.3f}s  [{marker.source}] {marker.label}")
 

@@ -385,6 +385,20 @@ def read_frames(header: Header, start: int, stop: int) -> np.ndarray:
     return np.frombuffer(raw, dtype=dtype).reshape(stop - start, header.order)
 
 
+def stored_range(header: Header, chunk: int = 1 << 16) -> tuple[np.ndarray, np.ndarray] | None:
+    """Per-channel (min, max) of the stored integers, or None for an empty file.
+
+    One chunked pass over the samples; vwr2edf needs it for 32-bit files, whose
+    full integer range is far wider than any int16 EDF signal can resolve.
+    """
+    lo = hi = None
+    for frames in iter_frames(header, chunk):
+        fmin, fmax = frames.min(axis=0).astype(np.int64), frames.max(axis=0).astype(np.int64)
+        lo = fmin if lo is None else np.minimum(lo, fmin)
+        hi = fmax if hi is None else np.maximum(hi, fmax)
+    return None if lo is None else (lo, hi)
+
+
 def calibrated(frames: np.ndarray, channels: tuple[Channel, ...]) -> np.ndarray:
     """Apply libvwr's per-channel physical calibration."""
     ground = np.asarray([c.lground for c in channels], dtype=np.float64)

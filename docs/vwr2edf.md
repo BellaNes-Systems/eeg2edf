@@ -36,11 +36,21 @@ Each source sample is calibrated exactly as `libvwr`:
 (stored_value - lground) * (pmax - pmin) / (lmax - lmin + 1)
 ```
 
-EDF stores 16-bit samples. `vwr2edf` scales each calibrated signal to its
-physical range; 32-bit VWR source integers therefore cannot be bit-identical
-after EDF export. A montage trace spans two channels, so its physical range is
-the difference of theirs and one LSB is twice as coarse as the referential
-channel's.
+EDF stores 16-bit samples. `vwr2edf` scales each calibrated signal to the
+physical range of a stored-integer interval:
+
+- **1- and 2-byte samples**: the full integer range. 2^16 EDF steps hold every
+  stored value, so referential output is exact.
+- **4-byte samples**: the calibration range `lmin..lmax`, widened to the
+  smallest and largest values actually stored (one extra pass over the data), so
+  nothing is clipped. These samples are quantised to within half an EDF LSB.
+  Spreading the full 2^32 range would make each EDF step 65,537 stored steps,
+  which is what `vwr2edf` did up to 0.1.0.
+
+A montage trace spans two channels, so its physical range is the difference of
+theirs and one LSB is twice as coarse as the referential channel's. The
+sidecar's `resolution_uv_per_lsb` is the EDF step and `factor` the stored one,
+and `--list` prints both per channel.
 
 ### Montages
 
@@ -106,7 +116,9 @@ Against a real 36-channel 256 Hz recording:
 - the `TRIGGER`, `EVENT A`, `EVENT B` and `FLAGS` areas of that file are empty
   (all 8192 trigger slots are `0xFFFFFFFF`), so those parsers are covered by
   the synthetic tests only and are **not yet verified against a real file that
-  carries them**.
+  carries them**;
+- that recording has 16-bit samples, so the 4-byte scaling is covered by the
+  synthetic tests only.
 
 For a local recording, use `--list` first, then compare non-identifying
 structure and calibrated sample windows against the local `libvwr` `vwrdump`

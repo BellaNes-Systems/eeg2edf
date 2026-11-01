@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: `vwr2edf` on 32-bit recordings kept only 1/65,537 of the source
+  resolution.** The whole 2^32 integer range was spread over EDF's 2^16 steps.
+  4-byte channels now use their calibration range `lmin..lmax`, widened to the
+  values actually stored so nothing is clipped. Re-convert any 4-byte VWR EDFs.
+  1- and 2-byte output is unchanged.
+- `vwr2edf --list` prints the sample width and, per channel, the EDF resolution
+  and whether it is exact.
+- README: a "Precision: what is lossless" section on which inputs and options
+  round-trip exactly, and how to read that from the sidecar.
+
 ## 0.1.0
 
 First release as a package.
